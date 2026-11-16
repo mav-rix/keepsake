@@ -207,3 +207,38 @@ def test_names_from_before_the_rename_still_work(monkeypatch, tmp_path):
     monkeypatch.setattr(embed, "WINDOWS", False)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     assert "keepsake" in embed.model_dir().parts
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "admin_client_" + "secret = " + "Ab1" * 5,
+        "slas-client-" + "secret: '" + "Zy9" * 4 + "'",
+        "Authorization: Bea" + "rer " + "abc012" * 5,
+        "https://hooks.sl" + "ack.com/services/T000AAAA/B000BBBB/" + "X" * 24,
+        "https://x.example.com/workflows/abc/triggers/manual/paths/invoke?api-version=1&si" + "g=" + "Ab1" * 7,
+    ],
+)
+def test_secret_filter_catches_prefixed_names_tokens_and_webhooks(text):
+    assert find_secrets(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "admin_client_secret = <Account Manager API client password>",
+        "The webhook URL is stored in .auth under teams_webhook; never print it.",
+        "Search refine=pmid=<promotionId> lists products; token scopes are sfcc.jobs and sfcc.products.",
+        "See https://example.com/docs?page=2&sort=asc for the bearer flow.",
+    ],
+)
+def test_secret_filter_leaves_placeholders_and_plain_notes(text):
+    assert not find_secrets(text)
+
+
+def test_close_folds_the_wal_into_the_database(tmp_path):
+    s = Store(tmp_path / "m.db")
+    s.remember("Printer", "The office printer is a Brother HL-L2350DW on the guest network.")
+    s.close()
+    wal = tmp_path / "m.db-wal"
+    assert not wal.exists() or wal.stat().st_size == 0

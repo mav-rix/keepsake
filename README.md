@@ -273,7 +273,15 @@ AI as part of the conversation. Keep work and personal memories in separate data
 
 ## Backups, moving machines, tidying up
 
+keepsake backs itself up: on the first tool call of each day it writes
+`backups/keepsake-YYYY-MM-DD.jsonl` next to the database (readable only by you) and keeps the
+newest 14. Set `KEEPSAKE_BACKUPS=30` to keep more, or `0` to turn it off. `keepsake backup`
+writes today's file now. The write-ahead log is folded into `memory.db` every few writes and
+when the server stops, but if you copy the database by hand, copy `memory.db-wal` too (or run
+`keepsake backup` first).
+
 ```bash
+keepsake backup                           # today's backup, now
 keepsake export ~/memory-backup.jsonl     # readable only by you; warns if inside a git repo
 keepsake import ~/memory-backup.jsonl --dry-run
 keepsake import ~/memory-backup.jsonl

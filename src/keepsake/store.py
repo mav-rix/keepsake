@@ -53,6 +53,15 @@ FULL_TEXT_BUDGET = 8000
 # scored 0.61-0.74 in calibration); keyword-only mode uses word overlap instead.
 REVIEW_COSINE = 0.60
 REVIEW_JACCARD = 0.50
+# Long notes about one project share vocabulary and score 0.60-0.70 with each other without
+# being the same fact. Below this cosine a pair is only listed when the titles or the wording
+# also overlap.
+REVIEW_COSINE_SURE = 0.75
+REVIEW_TITLE_OVERLAP = 0.34
+REVIEW_TEXT_OVERLAP = 0.30
+# Fold the write-ahead log into memory.db after this many writes (and on close), so a copy of
+# memory.db alone is never far behind.
+CHECKPOINT_EVERY = 10
 
 
 class EmbedderLike(Protocol):
@@ -235,6 +244,7 @@ class Store:
     path: Path
     embedder: EmbedderLike | None = None
     _writes: int = field(default=0, init=False, repr=False)
+    _checkpointed_at: int = field(default=0, init=False, repr=False)
     _vec_key: tuple | None = field(default=None, init=False, repr=False)
     _vec_ids: Any = field(default=None, init=False, repr=False)
     _vec_mat: Any = field(default=None, init=False, repr=False)
@@ -267,7 +277,15 @@ class Store:
             os.chmod(self.path, 0o600)
 
     def close(self) -> None:
+        self.checkpoint(truncate=True)
         self.db.close()
+
+    def checkpoint(self, truncate: bool = False) -> None:
+        """Fold the write-ahead log into memory.db. Never raises: another process may hold it."""
+        try:
+            self.db.execute(f"PRAGMA wal_checkpoint({'TRUNCATE' if truncate else 'PASSIVE'})")
+        except sqlite3.Error:
+            pass
 
     # ── helpers ────────────────────────────────────────────────────────────
     def _row(self, memory_id: int) -> sqlite3.Row:
@@ -952,6 +970,12 @@ class Store:
         for (a, b), sim in sorted(pairs.items(), key=lambda kv: kv[1], reverse=True)[:limit]:
             older, newer = sorted((active[a], active[b]), key=lambda r: (r["updated_at"], r["id"]))
             dup = sim >= dup_at
+            if self.embedder and sim < REVIEW_COSINE_SURE and not (
+                (older["topic_key"] and older["topic_key"] == newer["topic_key"])
+                or similarity(older["title"], newer["title"]) >= REVIEW_TITLE_OVERLAP
+                or similarity(older["content"], newer["content"]) >= REVIEW_TEXT_OVERLAP
+            ):
+                continue  # same subject area, not the same fact
             out.append(
                 {
                     "similarity": round(sim, 2),
@@ -1071,6 +1095,9 @@ class Store:
         self.db.execute(
             "INSERT INTO tool_calls(at, tool, chars, ok) VALUES (?,?,?,?)", (_now(), tool, chars, int(ok))
         )
+        if self._writes - self._checkpointed_at >= CHECKPOINT_EVERY:
+            self._checkpointed_at = self._writes
+            self.checkpoint()
 
     def usage(self, days: int = 30) -> dict[str, Any]:
         """Per-tool call counts and returned text, as a rough token estimate (4 chars ≈ 1 token)."""

@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .store import Store, StoreError, _now
+from .store import Store, StoreError, _now, setting
 
 FORMAT = "keepsake"
 _FORMATS = (FORMAT, "chat-memory")  # exports made before the rename still import
@@ -61,6 +61,30 @@ def export_jsonl(store: Store, out, include_forgotten: bool = False) -> int:
         out.write(json.dumps(rec, ensure_ascii=False) + "\n")
         n += 1
     return n
+
+
+def auto_backup(store: Store, force: bool = False) -> Path | None:
+    """One export a day into ``backups/`` next to the database, keeping the newest
+    KEEPSAKE_BACKUPS files (default 14; 0 turns it off). Returns the file written, if any."""
+    try:
+        keep = int(setting("BACKUPS", "14"))
+    except ValueError:
+        keep = 14
+    if keep <= 0 or str(store.path) == ":memory:":
+        return None
+    folder = Path(store.path).parent / "backups"
+    target = folder / f"keepsake-{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+    if target.exists() and not force:
+        return None
+    folder.mkdir(mode=0o700, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    if export_to_file(store, tmp, include_forgotten=True) == 0 and not force:
+        tmp.unlink(missing_ok=True)  # nothing to back up yet
+        return None
+    os.replace(tmp, target)
+    for old in sorted(folder.glob("keepsake-*.jsonl"), reverse=True)[keep:]:
+        old.unlink(missing_ok=True)
+    return target
 
 
 def export_to_file(store: Store, path: Path, include_forgotten: bool = False) -> int:

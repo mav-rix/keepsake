@@ -275,3 +275,20 @@ def test_cli_export_warns_about_synced_folder(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "plain, unencrypted text" in err and "uploaded to the cloud" in err
     server.store.cache_clear()
+
+
+def test_auto_backup_once_a_day_and_prunes(store, tmp_path, monkeypatch):
+    from keepsake import transfer
+
+    assert transfer.auto_backup(store) is None  # nothing to back up yet
+    store.remember("Router", "The home router admin page is at 192.168.1.1, model AX55.")
+    first = transfer.auto_backup(store)
+    assert first and first.exists() and first.parent.name == "backups"
+    assert transfer.auto_backup(store) is None  # already done today
+    for d in range(1, 20):
+        (first.parent / f"keepsake-2020-01-{d:02d}.jsonl").write_text("{}\n")
+    monkeypatch.setenv("KEEPSAKE_BACKUPS", "3")
+    assert transfer.auto_backup(store, force=True) == first
+    assert len(list(first.parent.glob("keepsake-*.jsonl"))) == 3
+    monkeypatch.setenv("KEEPSAKE_BACKUPS", "0")
+    assert transfer.auto_backup(store, force=True) is None

@@ -106,7 +106,29 @@ def store() -> Store:
 store.cache_clear = _open_store.cache_clear  # type: ignore[attr-defined]
 
 
+_BACKUP_DAY = ""
+
+
+def _daily_backup() -> None:
+    """Once a day, on the first tool call, export to backups/ (see transfer.auto_backup)."""
+    global _BACKUP_DAY
+    import datetime
+
+    today = datetime.date.today().isoformat()
+    if today == _BACKUP_DAY:
+        return
+    _BACKUP_DAY = today
+    try:
+        from . import transfer
+
+        transfer.auto_backup(store())
+    except Exception:  # a failed backup must never break a tool call, but say so
+        print("keepsake: daily backup failed:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+
+
 def _log(tool: str, chars: int, ok: bool) -> None:
+    _daily_backup()
     try:
         store().log_call(tool, chars, ok)
     except Exception:  # the usage log must never break a tool call, but say so
@@ -333,6 +355,7 @@ def main(argv: list[str] | None = None) -> None:
     mt.add_argument("--text", action="store_true",
                     help="also match cells without identifiers (names) as whole phrases")
     mt.add_argument("--json", action="store_true", help="print JSON instead of text")
+    sub.add_parser("backup", help="write today's backup now (backups/ next to the database; one a day is automatic)")
     rv = sub.add_parser("review", help="list memories worth tidying")
     rv.add_argument("--stale-days", type=int, default=180)
     rv.add_argument("--json", action="store_true", help="print JSON instead of text")
@@ -469,6 +492,10 @@ def _run(args, json, sys, transfer) -> None:
                       f"use --table {t['table']} --map content=COLUMN if that's where the memories are.")
         else:
             print("\nNo table with an obvious text column; pass --table and --map content=COLUMN.")
+    elif args.cmd == "backup":
+        path = transfer.auto_backup(store(), force=True)
+        store().checkpoint(truncate=True)
+        print(f"Backup written: {path}" if path else "Backups are turned off (KEEPSAKE_BACKUPS=0).")
     elif args.cmd == "review":
         r = store().review(args.stale_days)
         print(json.dumps(r, indent=2)) if args.json else _print_review(r)
