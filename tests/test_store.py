@@ -228,7 +228,7 @@ def test_secret_filter_catches_prefixed_names_tokens_and_webhooks(text):
     [
         "admin_client_secret = <Account Manager API client password>",
         "The webhook URL is stored in .auth under teams_webhook; never print it.",
-        "Search refine=pmid=<promotionId> lists products; token scopes are sfcc.jobs and sfcc.products.",
+        "Search refine=pmid=<promotionId> lists products; token scopes are read.jobs and read.products.",
         "See https://example.com/docs?page=2&sort=asc for the bearer flow.",
     ],
 )
